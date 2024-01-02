@@ -94,6 +94,7 @@ class WikidataSpotlightEntityLinker(BasePipeline):
                 entity = Entity(ann['URI'],
                                 boundaries=(e_start, e_end),
                                 surfaceform=ann['surfaceForm'],
+                                title=ann['surfaceForm'],
                                 annotator=self.annotator_name)
 
                 document.entities.append(entity)
@@ -119,14 +120,15 @@ class DateLinker(BasePipeline):
                 if date["type"] == "DATE" and pattern.match(date["value"]):
                     val = date["value"]
                     if val[0] == '-':
-                        if len(val[1:]) == 4:
-                            stdform = '"' + val + '-00-00T00:00:00Z"^^xsd:dateTime'
-                        elif len(val[1:]) == 7:
-                            stdform = '"' + val + '-00T00:00:00Z"^^xsd:dateTime'
-                        elif len(val[1:]) == 10:
-                            stdform = '"' + val + 'T00:00:00Z"^^xsd:dateTime'
-                        else:
-                            stdform = '"' + val + '"^^http://www.w3.org/2001/XMLSchema#dateTime'
+                        val = val[1:]
+                        # if len(val[1:]) == 4:
+                        #     stdform = '"' + val + '-00-00T00:00:00Z"^^xsd:dateTime'
+                        # elif len(val[1:]) == 7:
+                        #     stdform = '"' + val + '-00T00:00:00Z"^^xsd:dateTime'
+                        # elif len(val[1:]) == 10:
+                        #     stdform = '"' + val + 'T00:00:00Z"^^xsd:dateTime'
+                        # else:
+                        #     stdform = '"' + val + '"^^http://www.w3.org/2001/XMLSchema#dateTime'
 
                     else:
                         if len(val) == 4:
@@ -144,6 +146,7 @@ class DateLinker(BasePipeline):
                     entity = Entity(uri=stdform,
                                     boundaries=(start, end),
                                     surfaceform=document.text[start:end],
+                                    title=stdform,
                                     annotator=self.annotator_name)
 
                     document.entities.append(entity)
@@ -203,10 +206,11 @@ class DateLinkerSpacy(BasePipeline):
                 date = dateparser.parse(str(span), languages=['es','en','ca','zh','it'], settings={'PREFER_DAY_OF_MONTH': 'first', 'RELATIVE_BASE': datetime.datetime(2020, 1, 1)})
                 if date:
                     annotator = self.annotator_name
-                    stdform = date.strftime("%Y-%m-%dT00:00:00Z^^http://www.w3.org/2001/XMLSchema#dateTime")
+                    stdform = date.strftime("+%Y-%m-%dT00:00:00Z")
                     entity = Entity(uri=stdform,
                         boundaries=(span.start_char, span.end_char),
                         surfaceform=str(span),
+                        title=stdform,
                         annotator=annotator)
 
                     document.entities.append(entity)
@@ -222,6 +226,7 @@ class DateLinkerSpacy(BasePipeline):
                     entity = Entity(uri=stdform,
                                     boundaries=(span.start_char, span.end_char),
                                     surfaceform=str(span),
+                                    title=stdform,
                                     annotator=annotator)
 
                     document.entities.append(entity)
@@ -314,10 +319,11 @@ class DateLinkerRegex(BasePipeline):
                 else:
                     date = dateparser.parse(str(span.group()), languages=[self.language], settings={'PREFER_DAY_OF_MONTH': 'first', 'RELATIVE_BASE': datetime.datetime(2020, 1, 1)})
                 annotator = self.annotator_name
-                stdform = date.strftime("%Y-%m-%dT00:00:00Z^^http://www.w3.org/2001/XMLSchema#dateTime")
+                stdform = date.strftime("+%Y-%m-%dT00:00:00Z")
                 entity = Entity(uri=stdform,
                     boundaries=(span.end()-len(span.group().lstrip(' of ')), span.end()),
                     surfaceform=str(span.group().lstrip(' of ')),
+                    title=stdform,
                     annotator=annotator)
 
                 document.entities.append(entity)
@@ -337,6 +343,7 @@ class DateLinkerRegex(BasePipeline):
                     entity = Entity(uri=stdform,
                                     boundaries=(span.start(), span.end()),
                                     surfaceform=str(span.group()),
+                                    title=stdform,
                                     annotator=annotator)
 
                     document.entities.append(entity)

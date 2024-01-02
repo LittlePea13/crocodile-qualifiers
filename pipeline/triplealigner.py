@@ -36,7 +36,8 @@ class NoSubjectAlign(BasePipeline):
             else:
                 subject = Entity(document.uri,
                                  boundaries=None,
-                                 surfaceform=document.title,
+                                 surfaceform=None,
+                                 title=document.title,
                                  annotator=self.annotator_name)
 
             for o in es:
@@ -56,13 +57,14 @@ class NoSubjectAlign(BasePipeline):
                 predicates = self.wikidata_triples.get(subject, o)
 
                 for pred in predicates:
-                    pred = Entity(pred,
+                    pred_ent = Entity(pred,
                                   boundaries=None,
-                                  surfaceform=self.wikidata_triples.get_label(pred),
+                                  surfaceform=None,
+                                  title=self.wikidata_triples.get_label(pred),
                                   annotator=self.annotator_name)
 
                     triple = Triple(subject=subject,
-                                    predicate=pred,
+                                    predicate=pred_ent,
                                     object=o,
                                     sentence_id=sid,
                                     annotator=self.annotator_name
@@ -72,6 +74,63 @@ class NoSubjectAlign(BasePipeline):
 
         return document
 
+class SubjectAlign(BasePipeline):
+    """
+    Following the assumption in NoSUB  [1] and [2] that sentences in one paragraph all share the same subject.
+    [1] Augenstein, Isabelle, Diana Maynard, and Fabio Ciravegna. "Distantly supervised web relation extraction for knowledge base population." Semantic Web 7.4 (2016): 335-349.
+    [2] WikiReading: A Novel Large-scale Language Understanding Task over Wikipedia Hewlett et al. 2016
+    """
+    def __init__(self, triples_reference):
+        self.annotator_name = "NoSubject-Triple-aligner"
+
+        # pd.read_csv(triples_file, sep="\t", names=["subject", "predicate", "object"]).set_index(['subject', 'object'])
+
+        self.wikidata_triples = triples_reference
+
+
+    def run(self, document):
+        """
+        :param: input document to align its sentences with triples
+        :return:
+        """
+        for sid, (start, end) in enumerate(document.sentences_boundaries):
+
+            # Getting sentence subject
+            # Every sentence has main entity as subject
+
+            # if subject already tagged use it if not use only the URI
+            # entities in sentence
+            es = [j for j in document.entities if j.boundaries[0] >= start and j.boundaries[1] <= end]
+            e_sub = [j for j in document.entities if j.uri == document.uri]
+            if len(e_sub) > 0:
+                subject = e_sub[0]
+            else:
+                continue
+
+            for o in es:
+                if subject.uri == o.uri or o.uri == None or o.uri == "":
+                    continue
+
+                predicates = self.wikidata_triples.get(subject, o)
+
+                for pred in predicates:
+                    pred_ent = Entity(pred,
+                                  boundaries=None,
+                                  surfaceform=None,
+                                  title=self.wikidata_triples.get_label(pred),
+                                  annotator=self.annotator_name)
+
+                    triple = Triple(subject=subject,
+                                    predicate=pred_ent,
+                                    object=o,
+                                    sentence_id=sid,
+                                    paragraph_id=None,
+                                    annotator=self.annotator_name
+                                    )
+
+                    document.triples.append(triple)
+
+        return document 
 
 class SimpleAligner(BasePipeline):
     """
@@ -81,13 +140,13 @@ class SimpleAligner(BasePipeline):
     It won't match Q1 with itself, but if Q1 == Q2, it will try to find a
     property between them
     """
-    def __init__(self, triples_reference):
+    def __init__(self, triples_reference, extract_qualifiers=False):
         """
         :param: input document containing the triples (two entities and
         the property that bind them together)
         """
         self.annotator_name = "Simple-Aligner"
-
+        self.extract_qualifiers = extract_qualifiers
         self.wikidata_triples = triples_reference
 
     def run(self, document):
@@ -101,27 +160,101 @@ class SimpleAligner(BasePipeline):
             for o in itertools.permutations(es, 2):
                 if o[0].uri == o[1].uri:
                     continue
+                if self.extract_qualifiers:
+                    predicates = self.wikidata_triples.get_propositions(o[0], o[1])
+                else:
+                    predicates = self.wikidata_triples.get(o[0], o[1])
+
+                # And create the triples
+                for predicate in predicates:
+                    pred_name = predicate[0] if type(predicate) == list else predicate
+                    pred_ent = Entity(pred_name,
+                                  boundaries=None,
+                                  surfaceform=None,
+                                  title=self.wikidata_triples.get_label(pred_name),
+                                  annotator=self.annotator_name)
+
+                    triple = Triple(subject=o[0],
+                                    predicate=pred_ent,
+                                    object=o[1],
+                                    sentence_id=sid,
+                                    paragraph_id=None,
+                                    annotator=self.annotator_name
+                                    )
+                    document.triples.append(triple)
+                    if self.extract_qualifiers:
+                        for qualifier_name, qualifier_object in predicate[1]:
+                            if qualifier_name != "" and qualifier_object != "":
+                                for e in es:
+                                    if e.uri == qualifier_object:
+                                        qual_ent = Entity(qualifier_name,
+                                                          boundaries=None,
+                                                          surfaceform=None,
+                                                          title=self.wikidata_triples.get_label(pred_name),
+                                                          annotator=self.annotator_name
+                                        )
+                                        qualifier = Qualifier(triple,
+                                                              qualifier=qual_ent,
+                                                              qualifier_object=e,
+                                                              sentence_id=sid,
+                                                              paragraph_id=None,
+                                                              annotator=self.annotator_name,
+                                        )
+                                        document.qualifiers.append(qualifier)
+        return document
+
+class SimpleParagraphAligner(BasePipeline):
+    """
+    Take a document with tagged entities and match them with one another.
+    Example : If we have three entities Q1, Q2 and Q3, it will try to find a
+    property binding Q1 with Q2, Q2 with Q1, Q2 with Q3 etc...
+    It won't match Q1 with itself, but if Q1 == Q2, it will try to find a
+    property between them. Previous class did it sentence level, this one
+    does it paragraph level.
+    """
+    def __init__(self, triples_reference):
+        """
+        :param: input document containing the triples (two entities and
+        the property that bind them together)
+        """
+        self.annotator_name = "Simple-Paragraph-Aligner"
+
+        self.wikidata_triples = triples_reference
+    def run(self, document):
+        """
+        :param: input document to align its paragraphs with triples
+        :return:
+        """
+        for pid, (start, end) in enumerate(document.paragraphs_boundaries):
+            es = [j for j in document.entities if j.boundaries[0] >= start and j.boundaries[1] <= end]
+            # We use permutations to match every entity with all the others
+            for o in itertools.permutations(es, 2):
+                if o[0].uri == o[1].uri:
+                    continue
 
                 predicates = self.wikidata_triples.get(o[0], o[1])
 
                 # And create the triples
                 for pred in predicates:
-                    pred = Entity(pred,
+                    pred_ent = Entity(pred,
                                   boundaries=None,
-                                  surfaceform=self.wikidata_triples.get_label(pred),
+                                  surfaceform=None,
+                                  title=self.wikidata_triples.get_label(pred),
                                   annotator=self.annotator_name)
 
                     triple = Triple(subject=o[0],
-                                    predicate=pred,
+                                    predicate=pred_ent,
                                     object=o[1],
-                                    sentence_id=sid,
+                                    sentence_id=None,
+                                    paragraph_id=pid,
                                     annotator=self.annotator_name
                                     )
-
+                    # add if not already in (check if it is not already in the document by entity and predicate)
+                    if any(t.subject.uri == triple.subject.uri and t.predicate.uri == triple.predicate.uri and t.object.uri == triple.object.uri for t in document.triples):
+                        continue
                     document.triples.append(triple)
 
         return document
-
 
 class SPOAligner(BasePipeline):
 
@@ -186,16 +319,19 @@ class NoAligner(BasePipeline):
         subj = Entity(s,
             boundaries=None,
             surfaceform=None,
+            title=None,
             annotator=self.annotator_name)
 
         pred = Entity(p,
             boundaries=None,
             surfaceform=None,
+            title=None,
             annotator=self.annotator_name)
 
         obj = Entity(o,
             boundaries=None,
             surfaceform=None,
+            title=None,
             annotator=self.annotator_name)
 
         triple = Triple(subject=subj,
@@ -253,16 +389,19 @@ class NoAlignerLimitedProperties(BasePipeline):
         subj = Entity(s,
             boundaries=None,
             surfaceform=None,
+            title=None,
             annotator=self.annotator_name)
 
         pred = Entity(p,
             boundaries=None,
             surfaceform=None,
+            title=None,
             annotator=self.annotator_name)
 
         obj = Entity(o,
             boundaries=None,
             surfaceform=None,
+            title=None,
             annotator=self.annotator_name)
 
         triple = Triple(subject=subj,

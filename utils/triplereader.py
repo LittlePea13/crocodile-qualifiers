@@ -80,22 +80,42 @@ class TripleDBReader:
             print(query)
         for result in results["results"]["bindings"]:
             self.d_properties[result['pName']['value']] = result['propertyLabel']['value']
+
         self._path_to_db = triples_file
 
     def get(self, suri, objuri):
         # with sqlite3.connect(self._path_to_db) as conn:
         with sqlite3.connect(self._path_to_db) as conn:
             c = conn.cursor()
-            c.execute("SELECT relation FROM triplets WHERE subjobj=?", (suri.uri+'\t'+objuri.uri,))
+            if objuri.uri == None:
+                print('hello')
+            c.execute("SELECT DISTINCT relation FROM triplets WHERE subjobj=?", (suri.uri+'\t'+objuri.uri,))
             results = c.fetchall()
         if len(results) > 0:
             return [result[0] for result in results]
         else:
             return []
 
+    def get_propositions(self, suri, objuri):
+        # with sqlite3.connect(self._path_to_db) as conn:
+        with sqlite3.connect(self._path_to_db) as conn:
+            c = conn.cursor()
+            c.execute("SELECT relation, qualifier, qualifier_object FROM triplets WHERE subjobj=?", (suri.uri+'\t'+objuri.uri,))
+            results = c.fetchall()
+        if len(results) > 0:
+            response = {}
+            for result in results:
+                if result[0][0] in response:
+                    response[result[0][0]].append(result[0][1:])
+                else:
+                    response[result[0][0]] = [result[0][1:]]
+            return [[key, val] for key, val in response.items()]
+        else:
+            return []
+
     def get_label(self, p):
-        p = self.d_properties[p]
-        return p
+        p_name = self.d_properties[p]
+        return p_name
 
     def get_exists(self, suri, rel, objuri):
         # with sqlite3.connect(self._path_to_db) as conn:

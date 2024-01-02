@@ -38,11 +38,11 @@ def main_db(input_file = '/mnt/sda/RE-NLG-Dataset/datasets/wikidata/wikidata-tri
             for k, line in enumerate(open(i + '/' + file_name)):
                 for match in re.finditer(pattern, line):
                     wikidata_ids.add(match.group(1))
+    print(f'Found {len(wikidata_ids)} different entities')
     try:
         os.remove(output_file)
     except FileNotFoundError:
         pass
-    print(f'Found {len(wikidata_ids)} different entities')
     conn = sqlite3.connect(output_file, isolation_level="EXCLUSIVE")
     with conn:
         conn.execute(

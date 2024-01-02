@@ -41,9 +41,12 @@ from nltk.tokenize.punkt import PunktSentenceTokenizer, PunktParameters
 punkt_param = PunktParameters()
 punkt_param.abbrev_types = set(['st', 'dr', 'prof', 'mgr', 'sgt', 'mr', 'mrs', 'inc', 'no', 'etc'])
 
+class SentenceTokenizer(PunktSentenceTokenizer):
+    pass
+
 class Document:
 
-    def __init__(self, docid, title, pageuri, text, sentence_boundaries=None, words_boundaries=None, entities=None, triples=None):
+    def __init__(self, docid, title, pageuri, text, sentence_boundaries=None, paragraphs_boundaries=None, words_boundaries=None, entities=None, triples=None, qualifiers=None):
         """
 
         initalization of document class
@@ -52,6 +55,7 @@ class Document:
         :param pageuri: URI of the item containing the main page
         :param text:  "text that is contained in the page"
         :param sentence_boundaries: start and end offsets of sentences
+        :param paragraphs_boundaries: start and end offsets of paragraphs
         :param word_boundaries: list of tuples (start, end) of each word in Wikipedia Article, start/ end are character indices
         :param entities: list of Entities in the document
         :param triples:  list of Triples aligned with sentences in the document
@@ -62,9 +66,11 @@ class Document:
         self.uri = pageuri
         self.text = text
         self.sentences_boundaries = self.__get_setences_boundaries() if sentence_boundaries is None else sentence_boundaries
+        self.paragraphs_boundaries = self.__get_paragraph_boundaries() if paragraphs_boundaries is None else paragraphs_boundaries
         self.words_boundaries = self.__get_words_boundaries() if words_boundaries is None else words_boundaries
         self.entities = [] if entities is None else entities
         self.triples = [] if triples is None else triples
+        self.qualifiers = [] if qualifiers is None else qualifiers
 
     @classmethod
     def fromJSON(cls, j):
@@ -78,11 +84,12 @@ class Document:
         uri = j['uri']
         text = j['text']
         sentences_boundaries = j['sentences_boundaries'] if 'sentences_boundaries' in j else None
+        paragraphs_boundaries = j['paragraphs_boundaries'] if 'paragraphs_boundaries' in j else None
         word_boundaries =j['words_boundaries'] if 'words_boundaries' in j else None
         entities = [Entity.fromJSON(ej) for ej in j['entities']] if 'entities' in j else None
         triples = [Triple.fromJSON(tj) for tj in j['triples']] if 'triples' in j else None
-
-        return Document(docid, title, uri, text, sentences_boundaries, word_boundaries, entities, triples)
+        qualifiers = [Qualifier.fromJSON(qj) for qj in j['qualifiers']] if 'qualifiers' in j else None
+        return Document(docid, title, uri, text, sentences_boundaries, paragraphs_boundaries, word_boundaries, entities, triples, qualifiers)
 
 
     def __get_setences_boundaries(self):
@@ -95,6 +102,42 @@ class Document:
         tokenizer = PunktSentenceTokenizer(punkt_param)
         sentences = list(tokenizer.span_tokenize(self.text))
         return sentences
+
+    # def __get_paragraph_boundaries(self):
+    #     """
+    #     function to tokenize paragraphs and return
+    #     paragraph boundaries of each sentence using a tokenizer.
+    #     :return:
+    #     """
+
+    #     tokenizer = PunktSentenceTokenizer(punkt_param)
+    #     paragraphs = list(tokenizer.span_tokenize(self.text))
+    #     sentences = list(tokenizer.span_tokenize(self.text))
+    #     return sentences
+    
+    def __get_paragraph_boundaries(self):
+        """
+        function to tokenize paragraphs and return
+        paragraph boundaries of each paragraph using a tokenizer.
+        :return:
+        """
+        tokenizer = PunktSentenceTokenizer(punkt_param)
+        sentence_spans = list(tokenizer.span_tokenize(self.text))
+        breaks = []
+        for i in range(len(sentence_spans) - 1):
+            sentence_divider = self.text[sentence_spans[i][1]: \
+                sentence_spans[i+1][0]]
+            if '\n' in sentence_divider:
+                breaks.append(i)
+        paragraph_spans = []
+        start = 0
+        for break_idx in breaks:
+            paragraph_spans.append((start, sentence_spans[break_idx][1]))
+            start = sentence_spans[break_idx+1][0]
+        if len(sentence_spans) == 0:
+            return []
+        paragraph_spans.append((start, sentence_spans[-1][1]))
+        return paragraph_spans
 
     def __get_words_boundaries(self):
         """
@@ -114,7 +157,9 @@ class Document:
         j = self.__dict__.copy()
         j['entities'] = [i.toJSON() for i in j['entities']] if 'entities' in j and j['entities'] is not None else []
         j['triples'] = [i.toJSON() for i in j['triples']] if 'triples' in j and j['triples'] is not None else []
-        del j['sentences_boundaries']
+        j['qualifiers'] = [i.toJSON() for i in j['qualifiers']] if 'qualifiers' in j and j['qualifiers'] is not None else []
+        # del j['sentences_boundaries']
+        # del j['paragraphs_boundaries']
         del j['words_boundaries']
         return j
 
@@ -124,9 +169,14 @@ class Document:
         """
         return [self.text[s:e] for s, e in self.sentences_boundaries]
 
-
+    def get_paragraphs(self):
+        """
+        :return: get paragraphs text
+        """
+        return [self.text[s:e] for s, e in self.paragraphs_boundaries]
+    
 class Entity:
-    def __init__(self, uri, boundaries, surfaceform, annotator=None, type_placeholder=None, property_placeholder=None):
+    def __init__(self, uri, boundaries, surfaceform, title, annotator=None, type_placeholder=None, property_placeholder=None):
         """
         :param uri: entity uri
         :param boundaries: start and end boundaries of the surface form in the sentence
@@ -137,6 +187,7 @@ class Entity:
         self.boundaries = boundaries
         self.surfaceform = surfaceform
         self.annotator = annotator
+        self.title = title
         # self.type_placeholder = type_placeholder
         # self.property_placeholder = property_placeholder
 
@@ -150,7 +201,7 @@ class Entity:
         annotator = j['annotator'] if 'annotator' in j else None
         type_placeholder = j['type_placeholder'] if 'type_placeholder' in j else None
         property_placeholder = j['property_placeholder'] if 'property_placeholder' in j else None
-        return Entity(j['uri'], j['boundaries'], j['surfaceform'], annotator, type_placeholder, property_placeholder)
+        return Entity(j['uri'], j['boundaries'], j['surfaceform'], j['title'], annotator, type_placeholder, property_placeholder)
 
     def toJSON(self):
 
@@ -158,12 +209,13 @@ class Entity:
 
 
 class Triple:
-    def __init__(self, subject, predicate, object, sentence_id, dependency_path=None, confidence=None, annotator=None):
+    def __init__(self, subject, predicate, object, sentence_id, paragraph_id, dependency_path=None, confidence=None, annotator=None):
         """
         :param subject: entity class containing the triple subject
         :param predicate: entity class containing the triple predicate
         :param object:    entity class containing the triple object
         :param sentence_id:  integer showing which sentence in the document this (0,1,2,3 .. first , second , third ..etc)
+        :param paragraph_id: integer showing which paragraph in the document this (0,1,2,3 .. first , second , third ..etc)
         :param dependency_path: "lexicalized dependency path between sub and obj if exists" or None (if not existing)
         :param confidence: confidence of annotation if possible
         :param annotator:
@@ -173,6 +225,7 @@ class Triple:
         self.predicate = predicate
         self.object = object
         self.sentence_id = sentence_id
+        self.paragraph_id = paragraph_id
         self.dependency_path = dependency_path
         self.confidence = confidence
         self.annotator = annotator
@@ -188,11 +241,12 @@ class Triple:
         predicate = Entity.fromJSON(j['predicate'])
         object = Entity.fromJSON(j['object'])
         sentence_id = j['sentence_id']
+        paragraph_id = j['paragraph_id']
         dependency_path = j['dependency_path'] if 'dependency_path' in j else None
         confidence = j['confidence'] if 'confidence' in j else None
         annotator = j['annotator'] if 'annotator' in j else None
 
-        return Triple(subject, predicate, object, sentence_id, dependency_path, confidence, annotator)
+        return Triple(subject, predicate, object, sentence_id, paragraph_id, dependency_path, confidence, annotator)
 
     def toJSON(self):
         j = self.__dict__.copy()
@@ -202,6 +256,53 @@ class Triple:
 
         return j
 
+class Qualifier:
+    def __init__(self, triplet, qualifier, qualifier_object, sentence_id, paragraph_id, dependency_path=None, confidence=None, annotator=None):
+        """
+        :param triplet: entity class containing the triple
+        :param qualifier: entity class containing the triple qualifier
+        :param qualifier_object: entity class containing the triple qualifier object
+        :param sentence_id:  integer showing which sentence in the document this (0,1,2,3 .. first , second , third ..etc)
+        :param paragraph_id: integer showing which paragraph in the document this (0,1,2,3 .. first , second , third ..etc)
+        :param dependency_path: "lexicalized dependency path between sub and obj if exists" or None (if not existing)
+        :param confidence: confidence of annotation if possible
+        :param annotator:
+        """
+
+        self.triplet = triplet
+        self.qualifier = qualifier
+        self.qualifier_object = qualifier_object
+        self.sentence_id = sentence_id
+        self.paragraph_id = paragraph_id
+        self.dependency_path = dependency_path
+        self.confidence = confidence
+        self.annotator = annotator
+
+    @classmethod
+    def fromJSON(cls, j):
+        """
+        initialize a triple class using a json object
+        :param j: json object of an entity
+        :return: Triple instantiated object
+        """
+        triplet = Triple.fromJSON(j['triplet'])
+        qualifier = Entity.fromJSON(j['qualifier'])
+        qualifier_object = Entity.fromJSON(j['qualifier_object'])
+        sentence_id = j['sentence_id']
+        paragraph_id = j['paragraph_id']
+        dependency_path = j['dependency_path'] if 'dependency_path' in j else None
+        confidence = j['confidence'] if 'confidence' in j else None
+        annotator = j['annotator'] if 'annotator' in j else None
+
+        return Qualifier(triplet, qualifier, qualifier_object, sentence_id, paragraph_id, dependency_path, confidence, annotator)
+    
+    def toJSON(self):
+        j = self.__dict__.copy()
+        j['triplet'] = j['triplet'].toJSON()
+        j['qualifier'] = j['qualifier'].toJSON()
+        j['qualifier_object'] = j['qualifier_object'].toJSON()
+
+        return j
 
 class BasePipeline:
 

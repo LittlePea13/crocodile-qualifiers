@@ -1,7 +1,7 @@
 import multiprocessing
 from pipeline.entitylinker import *
 from pipeline.triplealigner import *
-from pipeline.datareader import WikiDataAbstractsDataReader
+from pipeline.datareader import WikiDataAbstractsDataReader, WikiDataJSONLDataReader
 from pipeline.writer import JsonWriter, JsonlWriter, OutputSplitter, NextFile
 from utils.triplereader import *
 from pipeline.filter import *
@@ -25,14 +25,14 @@ parser.add_argument("--language", default = 'ko',
  
 args = parser.parse_args()
 # Reading the Wikipedia Abstracts Dataset
-reader = WikiDataAbstractsDataReader(args.input)
+reader = WikiDataJSONLDataReader(args.input)
 main_ent_lim = MainEntityLimiter()
-min_ent_lim = EntityLimiter(2, 100)
+min_ent_lim = EntityLimiter(2, 9999)
 min_trip_lim = MinTriplesLimiter(1)
 # min_trip_lim = TriplesLimiter(5, 500)
 
-filter_entities = ['Q4167410', 'Q13406463', 'Q18340514', 'Q12308941', 'Q11879590', 'Q101352']
-
+filter_entities = ['Q4167410', 'Q13406463', 'Q18340514', 'Q12308941', 'Q11879590', 'Q101352', 'Q98645843']
+# filter_entities = []
 # trip_read = TripleSPARQLReader('./datasets/wikidata/wikidata-triples.csv')
 if args.input_triples.endswith('.db'):
     trip_read = TripleDBReader(args.input_triples, args.language)
@@ -56,6 +56,8 @@ date = DateLinkerRegex(args.language)
 
 #SPOalign = SPOAligner(trip_read)
 NSalign = NoSubjectAlign(trip_read)
+Subjalign = SubjectAlign(trip_read)
+Paralign = SimpleParagraphAligner(trip_read)
 # writer = JsonlWriter(args.output, "re-nlg", filesize=5000, startfile=__START_DOC__)
 nextFile = NextFile(args.output)
 output = OutputSplitter(nextFile, 5000, False)
@@ -65,18 +67,21 @@ def multhithreadprocess(q, output_queue):
         d = q.get()
         if d is None:
             break
+        if not main_ent_lim.run(d):
+            # output_queue.put('skip')
+            continue
         if trip_read.get_exists(d.uri, 'P31', filter_entities):
             continue
         d = date.run(d)
         # d = date.run(d)
-        if not main_ent_lim.run(d):
-            # output_queue.put('skip')
-            continue
+
         if not min_ent_lim.run(d):
             # output_queue.put('skip')
             continue
-        d = NSalign.run(d)
+        # d = NSalign.run(d)
+        d = Subjalign.run(d)
         d = Salign.run(d)
+        d = Paralign.run(d)
         if not min_trip_lim.run(d):
             # output_queue.put('skip')
             continue
