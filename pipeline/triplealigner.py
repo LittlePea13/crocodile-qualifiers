@@ -158,7 +158,7 @@ class SimpleAligner(BasePipeline):
             es = [j for j in document.entities if j.boundaries[0] >= start and j.boundaries[1] <= end]
             # We use permutations to match every entity with all the others
             for o in itertools.permutations(es, 2):
-                if o[0].uri == o[1].uri:
+                if o[0].uri == o[1].uri or o[0].uri == None or o[1].uri == None:
                     continue
                 if self.extract_qualifiers:
                     predicates = self.wikidata_triples.get_propositions(o[0], o[1])
@@ -190,7 +190,7 @@ class SimpleAligner(BasePipeline):
                                         qual_ent = Entity(qualifier_name,
                                                           boundaries=None,
                                                           surfaceform=None,
-                                                          title=self.wikidata_triples.get_label(pred_name),
+                                                          title=self.wikidata_triples.get_label(qualifier_name),
                                                           annotator=self.annotator_name
                                         )
                                         qualifier = Qualifier(triple,
@@ -212,13 +212,13 @@ class SimpleParagraphAligner(BasePipeline):
     property between them. Previous class did it sentence level, this one
     does it paragraph level.
     """
-    def __init__(self, triples_reference):
+    def __init__(self, triples_reference, extract_qualifiers=False):
         """
         :param: input document containing the triples (two entities and
         the property that bind them together)
         """
         self.annotator_name = "Simple-Paragraph-Aligner"
-
+        self.extract_qualifiers = extract_qualifiers
         self.wikidata_triples = triples_reference
     def run(self, document):
         """
@@ -229,17 +229,21 @@ class SimpleParagraphAligner(BasePipeline):
             es = [j for j in document.entities if j.boundaries[0] >= start and j.boundaries[1] <= end]
             # We use permutations to match every entity with all the others
             for o in itertools.permutations(es, 2):
-                if o[0].uri == o[1].uri:
+                if o[0].uri == o[1].uri or o[0].uri == None or o[1].uri == None:
                     continue
 
-                predicates = self.wikidata_triples.get(o[0], o[1])
+                if self.extract_qualifiers:
+                    predicates = self.wikidata_triples.get_propositions(o[0], o[1])
+                else:
+                    predicates = self.wikidata_triples.get(o[0], o[1])
 
                 # And create the triples
                 for pred in predicates:
-                    pred_ent = Entity(pred,
+                    pred_name = pred[0] if type(pred) == list else pred
+                    pred_ent = Entity(pred_name,
                                   boundaries=None,
                                   surfaceform=None,
-                                  title=self.wikidata_triples.get_label(pred),
+                                  title=self.wikidata_triples.get_label(pred_name),
                                   annotator=self.annotator_name)
 
                     triple = Triple(subject=o[0],
@@ -250,10 +254,28 @@ class SimpleParagraphAligner(BasePipeline):
                                     annotator=self.annotator_name
                                     )
                     # add if not already in (check if it is not already in the document by entity and predicate)
-                    if any(t.subject.uri == triple.subject.uri and t.predicate.uri == triple.predicate.uri and t.object.uri == triple.object.uri for t in document.triples):
-                        continue
-                    document.triples.append(triple)
-
+                    if not any(t.subject.uri == triple.subject.uri and t.predicate.uri == triple.predicate.uri and t.object.uri == triple.object.uri for t in document.triples):
+                        document.triples.append(triple)
+                    if self.extract_qualifiers:
+                        for qualifier_name, qualifier_object in pred[1]:
+                            if qualifier_name != "" and qualifier_object != "":
+                                for e in es:
+                                    if e.uri == qualifier_object:
+                                        qual_ent = Entity(qualifier_name,
+                                                          boundaries=None,
+                                                          surfaceform=None,
+                                                          title=self.wikidata_triples.get_label(qualifier_name),
+                                                          annotator=self.annotator_name
+                                        )
+                                        qualifier = Qualifier(triple,
+                                                              qualifier=qual_ent,
+                                                              qualifier_object=e,
+                                                              sentence_id=None,
+                                                              paragraph_id=pid,
+                                                              annotator=self.annotator_name,
+                                        )
+                                        if not any(t.triplet.subject.uri == qualifier.triplet.subject.uri and t.triplet.predicate.uri == qualifier.triplet.predicate.uri and t.triplet.object.uri == qualifier.triplet.object.uri and t.qualifier.uri == qualifier.qualifier.uri and t.qualifier_object.uri == qualifier.qualifier_object.uri for t in document.qualifiers):
+                                            document.qualifiers.append(qualifier)
         return document
 
 class SPOAligner(BasePipeline):
@@ -279,7 +301,7 @@ class SPOAligner(BasePipeline):
                                                 and j.annotator == 'Wikidata_Property_Linker']
 
             for o in itertools.permutations(es, 2):
-                if o[0].uri == o[1].uri:
+                if o[0].uri == o[1].uri or o[0].uri == None or o[1].uri == None:
                     continue
 
                 predicates = self.wikidata_triples.get(o[0], o[1])

@@ -105,10 +105,10 @@ class TripleDBReader:
         if len(results) > 0:
             response = {}
             for result in results:
-                if result[0][0] in response:
-                    response[result[0][0]].append(result[0][1:])
+                if result[0] in response:
+                    response[result[0]].append(result[1:])
                 else:
-                    response[result[0][0]] = [result[0][1:]]
+                    response[result[0]] = [result[1:]]
             return [[key, val] for key, val in response.items()]
         else:
             return []

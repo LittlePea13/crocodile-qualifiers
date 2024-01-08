@@ -38,7 +38,7 @@ if args.input_triples.endswith('.db'):
     trip_read = TripleDBReader(args.input_triples, args.language)
 else: 
     trip_read = TripleCSVReader(args.input_triples, args.language)
-Salign = SimpleAligner(trip_read)
+Salign = SimpleAligner(trip_read, extract_qualifiers=True)
 #prop = WikidataPropertyLinker('./datasets/wikidata/wikidata-properties.csv')
 if args.language == 'zh':
     spacy_model = 'zh_core_web_sm'
@@ -57,7 +57,7 @@ date = DateLinkerRegex(args.language)
 #SPOalign = SPOAligner(trip_read)
 NSalign = NoSubjectAlign(trip_read)
 Subjalign = SubjectAlign(trip_read)
-Paralign = SimpleParagraphAligner(trip_read)
+Paralign = SimpleParagraphAligner(trip_read, extract_qualifiers=True)
 # writer = JsonlWriter(args.output, "re-nlg", filesize=5000, startfile=__START_DOC__)
 nextFile = NextFile(args.output)
 output = OutputSplitter(nextFile, 5000, False)
